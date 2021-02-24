@@ -1,56 +1,77 @@
 #pragma once
 
-#include "modules/tello_socket.h"
-#include "modules/tello_logger.h"
 #include "modules/internals/util.h"
 
-#include <string>
-#include <regex>
-#include <memory>
+#include "modules/tello_socket.h"
+#include "modules/tello_logger.h"
 
 class Tello 
 {
     public:
         struct IMUAttitude 
         {
-                int pitch;
-                int roll;
-                int yaw;
+            int pitch;
+            int roll;
+            int yaw;
         };
 
         struct IMUAcceleration 
         {
-                float x_acceleration;
-                float y_acceleration;
-                float z_acceleration;
+            float x_acceleration;
+            float y_acceleration;
+            float z_acceleration;
         };
 
-        Tello(  
-              const bool &land_on_exit = false, 
-              const int &tello_response_timeout_secs = 12,
-              const std::string &tello_ip = "192.168.10.1", 
-              const int &tello_port = 8889,
-              const std::string &tello_client_ip = "0.0.0.0", 
-              const int &tello_client_port = 9000,
-              const std::string &tello_state_receiver_ip = "0.0.0.0", 
-              const int &tello_state_receiver_port = 8890,
-              const std::string &tello_video_receiver_ip = "0.0.0.0",
-              const int &tello_video_receiver_port = 11111
-             )
+        struct IMUVelocity 
         {
-                this->land_on_exit = land_on_exit;
-                this->tello_client = TelloSocket(tello_logger, tello_response_timeout_secs, tello_ip, tello_port, tello_client_ip, tello_client_port);
-                this->tello_state_receiver = TelloSocket(tello_logger, tello_response_timeout_secs, tello_ip, tello_port, tello_state_receiver_ip, tello_state_receiver_port);
-                this->tello_video_receiver = TelloSocket(tello_logger, tello_response_timeout_secs, tello_ip, tello_port, tello_video_receiver_ip, tello_video_receiver_port);
-                
+            int x_velocity;
+            int y_velocity;
+            int z_velocity;
+        };
+
+        struct TelloState 
+        {
+            IMUAttitude imu_attitude;
+            IMUVelocity imu_velocity;
+            float average_temprature;
+            int distance_from_takeoff;
+            int height;
+            int battery;
+            float barometer_reading;
+            int flight_time;
+            IMUAcceleration imu_acceleration;
+        };
+
+        bool land_on_exit;
+        bool tello_logging;
+
+        Tello
+        (
+        const bool &tello_logging = false,
+        const bool &land_on_exit = false, 
+        const int &tello_response_timeout_secs = 12,
+        const std::string &tello_ip = "192.168.10.1", 
+        const int &tello_port = 8889,
+        const std::string &tello_client_ip = "0.0.0.0", 
+        const int &tello_client_port = 9000,
+        const std::string &tello_state_receiver_ip = "0.0.0.0", 
+        const int &tello_state_receiver_port = 8890,
+        const std::string &tello_video_receiver_ip = "0.0.0.0",
+        const int &tello_video_receiver_port = 11111
+        ): 
+        land_on_exit{land_on_exit},
+        tello_logging{tello_logging},
+        tello_logger{TelloLogger(this->tello_logging)},
+        tello_client{TelloSocket(tello_logger, tello_response_timeout_secs, tello_ip, tello_port, tello_client_ip, tello_client_port)},
+        tello_state_receiver{TelloSocket(tello_logger, tello_response_timeout_secs, tello_ip, tello_port, tello_state_receiver_ip, tello_state_receiver_port)},
+        tello_video_receiver{TelloSocket(tello_logger, tello_response_timeout_secs, tello_ip, tello_port, tello_video_receiver_ip, tello_video_receiver_port)}
+        {
                 this->tello_client.send_command("command");
 
                 if (this->land_on_exit) 
                 {
                         this->start_flight_time = this->get_flight_time();
                 }
-
-                this->start_video_stream();
         }
 
         std::string takeoff() 
@@ -153,9 +174,32 @@ class Tello
                 return this->tello_client.send_command(format_string("wifi %s %s", new_tello_wifi_name.c_str(), new_tello_wifi_password.c_str()));
         }
 
-        std::string get_tello_state() 
+        TelloState get_tello_state() 
         {
-                return this->tello_state_receiver.receive_data();
+                std::string tello_state_response = this->tello_state_receiver.receive_data();
+
+                TelloState tello_state;
+
+                const std::regex tello_state_regex
+                (
+                R"((pitch:)(.+)(;roll:)(.+)(;yaw:)(.+)(;vgx:)(.+)(;vgy:)(.+)(;vgz:)(.+)(;templ:)(.+)(;temph:)(.+)(;tof:)(.+)(;h:)(.+)(;bat:)(.+)(;baro:)(.+)(;time:)(.+)(;agx:)(.+)(;agy:)(.+)(;agz:)(.+)(;))"
+                );
+
+                std::smatch matches;
+                regex_search(tello_state_response, matches, tello_state_regex);
+
+                return TelloState
+                {
+                {std::stoi(matches[2].str()), std::stoi(matches[4].str()), std::stoi(matches[6].str())}, 
+                {std::stoi(matches[8].str()), std::stoi(matches[10].str()), std::stoi(matches[12].str())}, 
+                (std::stof(matches[14].str()) + std::stof(matches[16].str())) / 2,
+                std::stoi(matches[18].str()), 
+                std::stoi(matches[20].str()), 
+                std::stoi(matches[22].str()), 
+                std::stof(matches[24].str()), 
+                std::stoi(matches[26].str()), 
+                {std::stof(matches[28].str()), std::stof(matches[30].str()), std::stof(matches[32].str())}
+                };
         }
 
         float get_speed() 
@@ -212,8 +256,6 @@ class Tello
 
         const IMUAttitude get_imu_attitude() 
         {
-                IMUAttitude imu_attitude;
-
                 const std::regex imu_attitude_regex(R"((pitch:)(.+)(;roll:)(.+)(;yaw:)(.+)(;))");
                 std::smatch matches;
 
@@ -223,11 +265,7 @@ class Tello
 
                 this->tello_logger.log_data("Tello IMU Attitude Units: Pitch, Roll, Yaw");
 
-                imu_attitude.pitch = std::stoi(matches[2].str());
-                imu_attitude.roll = std::stoi(matches[4].str());
-                imu_attitude.yaw = std::stoi(matches[6].str());
-
-                return imu_attitude;
+                return IMUAttitude{std::stoi(matches[2].str()), std::stoi(matches[4].str()), std::stoi(matches[6].str())};
         }
 
         float get_barometer_reading() 
@@ -237,8 +275,6 @@ class Tello
 
         IMUAcceleration get_imu_acceleration() 
         {
-                IMUAcceleration imu_acceleration;
-
                 const std::regex imu_acceleration_regex(R"((agx:)(.+)(;agy:)(.+)(;agz:)(.+)(;))");
                 std::smatch matches;
 
@@ -248,11 +284,7 @@ class Tello
 
                 this->tello_logger.log_data("Tello IMU Acceleration Units: X Acceleration, Y Acceleration, Z Acceleration");
 
-                imu_acceleration.x_acceleration = std::stof(matches[2].str());
-                imu_acceleration.y_acceleration = stof(matches[4].str());
-                imu_acceleration.z_acceleration = stof(matches[6].str());
-
-                return imu_acceleration;
+                return IMUAcceleration{std::stof(matches[2].str()), std::stof(matches[4].str()), std::stof(matches[6].str())};
         }
 
         float get_distance_from_takeoff() 
@@ -287,8 +319,6 @@ class Tello
                         {
                                 this->land();
                         }
-
-                        this->end_video_stream();
                 }
                 catch(...)
                 {
@@ -296,21 +326,10 @@ class Tello
                 }
         }
 
-        private:
-                int start_flight_time;
-                bool land_on_exit;
-                TelloLogger tello_logger;
-                TelloSocket tello_client;
-                TelloSocket tello_state_receiver;
-                TelloSocket tello_video_receiver;
-
-                std::string end_video_stream() 
-                {         
-                        return this->tello_client.send_command("streamoff");
-                }
-
-                std::string start_video_stream() 
-                {
-                        return this->tello_client.send_command("streamon");
-                }
+    private:
+        TelloLogger tello_logger;
+        TelloSocket tello_client;
+        TelloSocket tello_state_receiver;
+        TelloSocket tello_video_receiver;
+        int start_flight_time;
 };

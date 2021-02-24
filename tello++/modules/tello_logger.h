@@ -1,21 +1,14 @@
 #pragma once
 
-#include <iostream>
-#include <vector>
-#include <fstream>
-#include <string>
+#include<fstream>
+#include<iostream>
 
 class TelloLogger
 {
     public:
-        std::string log;
+        TelloLogger(bool &tello_logging) : tello_logging{tello_logging} {}
 
-        void tello_logger_initializer(const bool& tello_logging) 
-        {
-            this->tello_logging = tello_logging;
-        }
-
-        void write_log(const std::string &log_location) 
+        void write_log(const std::string &log_location) const
         {
             std::ofstream log_file;
             log_file.open(log_location);
@@ -23,18 +16,17 @@ class TelloLogger
             log_file.close();
         }
 
-        void log_data(const std::string &log_string)
+        void log_data(const std::string &to_log) const
         {
-            if (tello_logging)
+            if(this->tello_logging) 
             {
-                std::string log_string_n = log_string + '\n';
-                this->log += (log_string_n);
-                std::cout << log_string_n;
+                std::string log_string_newline = to_log + '\n';
+                this->log += log_string_newline;
+                std::cout << log_string_newline;
             }
         }
 
-        TelloLogger() = default;
-    
     private:
-        bool tello_logging;
+        bool &tello_logging;
+        mutable std::string log;
 };
